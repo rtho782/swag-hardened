@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!alpine-packages.lock
+!module-policy.sh

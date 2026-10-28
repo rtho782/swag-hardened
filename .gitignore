@@ -1,0 +1,12 @@
+.env
+*.key
+*.pem
+*.p12
+*.pfx
+config/
+appdata/
+private/
+*.tar
+*.tar.gz
+__pycache__/
+*.pyc

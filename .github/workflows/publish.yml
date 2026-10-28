@@ -1,0 +1,52 @@
+name: Build and publish checked image
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New immutable image version
+        required: true
+        default: 5.8.0-ls495-20261028-r1
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out exact public source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Build, verify and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${REQUESTED_VERSION:-${GITHUB_REF_NAME#v}}"
+          [[ "$version" =~ ^[0-9][a-zA-Z0-9_.-]{1,100}$ ]]
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          export DOCKER_CONFIG="$RUNNER_TEMP/ghcr-config"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          if docker manifest inspect "$image:$version" >/dev/null 2>&1; then
+            echo 'This immutable image version already exists. Choose a new version.' >&2
+            exit 1
+          fi
+          docker build --pull=false --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$image:$version" .
+          docker run --rm --network none --entrypoint /bin/sh "$image:$version" -c '/usr/local/lib/rtho-swag/module-policy.sh && /lsiopy/bin/python -m pip check && certbot --version && certbot plugins --text >/dev/null'
+          docker tag "$image:$version" "$image:latest"
+          docker push "$image:$version"
+          docker push "$image:latest"
+          echo "Published $image:$version" >> "$GITHUB_STEP_SUMMARY"
